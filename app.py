@@ -25,9 +25,9 @@ def generate_key():
 @app.route("/check", methods=["GET"])
 def check_key():
     key   = request.args.get("key", "").strip().upper()
-    nick  = request.args.get("nick", "").strip()
+    hwid  = request.args.get("hwid", "").strip()
 
-    if not key or not nick:
+    if not key or not hwid:
         return jsonify({"valid": False, "reason": "missing_params"}), 400
 
     keys = load_keys()
@@ -40,16 +40,16 @@ def check_key():
     if not entry.get("active", False):
         return jsonify({"valid": False, "reason": "key_disabled"}), 200
 
-    # Привязка к нику
-    bound_nick = entry.get("nick", "")
-    if bound_nick == "":
-        # Первый запуск — привязываем ник
-        keys[key]["nick"] = nick
+    # Привязка к HWID
+    bound_hwid = entry.get("hwid", "")
+    if bound_hwid == "":
+        # Первый запуск — привязываем HWID
+        keys[key]["hwid"] = hwid
         save_keys(keys)
-        return jsonify({"valid": True, "message": "Key activated for " + nick}), 200
+        return jsonify({"valid": True, "message": "Key activated"}), 200
 
-    if bound_nick.lower() != nick.lower():
-        return jsonify({"valid": False, "reason": "wrong_nick", "bound_to": bound_nick}), 200
+    if bound_hwid != hwid:
+        return jsonify({"valid": False, "reason": "wrong_hwid"}), 200
 
     return jsonify({"valid": True, "message": "OK"}), 200
 
@@ -97,7 +97,7 @@ def reset_nick():
     key = data.get("key", "").upper()
     if key not in keys:
         return jsonify({"error": "not found"}), 404
-    keys[key]["nick"] = ""
+    keys[key]["hwid"] = ""
     save_keys(keys)
     return jsonify({"ok": True}), 200
 

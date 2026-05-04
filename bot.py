@@ -2,7 +2,7 @@ import os, json, time, datetime, requests
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = "8662458138:AAGLmuPYurUuYwS5blN3NIinF2J2Bo_bCsg"
+TOKEN = "8682336617:AAEex2v172iD0mgrBAP7hdSSB46gHVq6xGk"
 SERVER = "https://web-production-24b86.up.railway.app"
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme123")
 ADMIN_IDS = os.environ.get("ADMIN_IDS", "835673342").split(",")  # твой Telegram ID

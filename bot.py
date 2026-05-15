@@ -1,37 +1,274 @@
-import os, json, time, datetime, requests
-from telegram import Update, ReplyKeyboardMarkup
+import os, json, time, datetime, requests, asyncio
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN = "8682336617:AAEex2v172iD0mgrBAP7hdSSB46gHVq6xGk"
 SERVER = "https://web-production-24b86.up.railway.app"
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme123")
-ADMIN_IDS = os.environ.get("ADMIN_IDS", "835673342").split(",")  # твой Telegram ID
+ADMIN_IDS = os.environ.get("ADMIN_IDS", "835673342").split(",")
 
 def is_admin(update: Update):
     return str(update.effective_user.id) in ADMIN_IDS
+
+def api(path, **kwargs):
+    return requests.post(f"{SERVER}{path}", json={"password": ADMIN_PASSWORD, **kwargs}, timeout=10)
+
+def fmt(n):
+    """Форматирует число с разделителями: 1234567 → 1 234 567"""
+    try:
+        return f"{int(n):,}".replace(",", " ")
+    except:
+        return str(n)
+
+# ── /help ─────────────────────────────────────────────────────────────────────
+
+async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
+    text = (
+        "📖 *Справка по командам*\n\n"
+
+        "━━━ 📊 *Статистика* ━━━\n"
+        "/stats — статистика всех аккаунтов\n"
+        "/stats monitor — только монитор\n"
+        "/stats buyer — только байер\n"
+        "/stats sellers — только продавцы\n\n"
+
+        "━━━ 🎮 *Управление модом* ━━━\n"
+        "/st `<цель>` `<команда>` — отправить команду\n\n"
+        "Цели: `monitor`, `buyer`, `seller`, `sellers`, `all`, или ник игрока\n\n"
+        "Примеры:\n"
+        "`/st sellers start` — запустить всех продавцов\n"
+        "`/st sellers stop` — остановить всех продавцов\n"
+        "`/st sellers rate 50000` — курс продавцам\n"
+        "`/st buyer start` — запустить байера\n"
+        "`/st buyer stop` — остановить байера\n"
+        "`/st buyer rate 45000` — мин. курс покупки\n"
+        "`/st monitor start` — запустить монитор\n"
+        "`/st all stop` — остановить всех\n\n"
+
+        "━━━ 💰 *Продажа коинов с байера* ━━━\n"
+        "/sell `<количество>` `<курс>` — продать коины с байера\n"
+        "Пример: `/sell 500 55000` — продать 500 коинов по 55000\n\n"
+
+        "━━━ 🔑 *Управление ключами* ━━━\n"
+        "/add1 `[заметка]` — ключ на 1 день\n"
+        "/add7 `[заметка]` — ключ на 7 дней\n"
+        "/add30 `[заметка]` — ключ на 30 дней\n"
+        "/add `<дни>` `[заметка]` — ключ на N дней\n"
+        "/list — список всех ключей\n"
+        "/disable `<ключ>` — отключить ключ\n"
+        "/reset `<ключ>` — сбросить HWID привязку\n"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+# ── /start ────────────────────────────────────────────────────────────────────
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         await update.message.reply_text("⛔ Нет доступа.")
         return
     await update.message.reply_text(
-        "🔑 *AutoSell Key Manager*\n\n"
-        "Команды:\n"
-        "/add1 — ключ на 1 день\n"
-        "/add7 — ключ на 7 дней\n"
-        "/add30 — ключ на 30 дней\n"
-        "/add <дни> <заметка> — ключ на N дней\n"
-        "/list — список всех ключей\n"
-        "/disable <ключ> — отключить ключ\n"
-        "/reset <ключ> — сбросить HWID\n",
+        "🤖 *AutoSell Manager*\n\n"
+        "Используй /help для полного списка команд.",
         parse_mode="Markdown"
     )
 
+# ── /stats ────────────────────────────────────────────────────────────────────
+
+async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
+
+    filter_role = ctx.args[0].lower() if ctx.args else None
+    # sellers → seller
+    if filter_role == "sellers": filter_role = "seller"
+
+    try:
+        r = api("/admin/accounts")
+        data = r.json()
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+        return
+
+    if not data:
+        await update.message.reply_text("📭 Нет зарегистрированных аккаунтов.")
+        return
+
+    role_emoji = {"monitor": "👁", "buyer": "🛒", "seller": "💸"}
+    lines = []
+
+    for nick, acc in data.items():
+        role = acc.get("role", "?")
+        if filter_role and role != filter_role:
+            continue
+
+        online = acc.get("online", False)
+        last_seen = acc.get("last_seen", 0)
+        stats_data = acc.get("stats", {})
+
+        status = "🟢 онлайн" if online else f"🔴 {last_seen}с назад"
+        emoji = role_emoji.get(role, "❓")
+
+        line = f"{emoji} *{nick}* [{role}] — {status}\n"
+
+        if stats_data:
+            running = stats_data.get("running", False)
+            line += f"  {'▶️ запущен' if running else '⏹ остановлен'}\n"
+
+            if role == "seller":
+                cycles = stats_data.get("cycles", 0)
+                coins = stats_data.get("coins_listed", 0)
+                money = stats_data.get("money_sold", 0)
+                rate = stats_data.get("rate", 0)
+                balance = stats_data.get("balance", -1)
+                line += f"  Курс: {fmt(rate)} | Циклов: {cycles}\n"
+                line += f"  Коинов: {fmt(coins)} | Монет: {fmt(money)}\n"
+                if balance >= 0:
+                    line += f"  Баланс: {fmt(balance)} монет\n"
+
+            elif role == "buyer":
+                buys = stats_data.get("buys", 0)
+                coins = stats_data.get("coins_bought", 0)
+                money = stats_data.get("money_spent", 0)
+                min_rate = stats_data.get("min_rate", 0)
+                line += f"  Мин.курс: {fmt(min_rate)} | Покупок: {buys}\n"
+                line += f"  Куплено: {fmt(coins)} коинов | {fmt(money)} монет\n"
+
+            elif role == "monitor":
+                signals = stats_data.get("signals", 0)
+                line += f"  Сигналов: {signals}\n"
+
+        lines.append(line)
+
+    if not lines:
+        await update.message.reply_text("Нет аккаунтов с такой ролью.")
+        return
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+# ── /st — отправить команду в мод ─────────────────────────────────────────────
+
+ROLE_COMMAND_MAP = {
+    # /st sellers start → /sell start
+    ("seller", "start"):  "/sell start",
+    ("seller", "stop"):   "/sell stop",
+    # /st buyer start → /autob start
+    ("buyer", "start"):   "/autob start",
+    ("buyer", "stop"):    "/autob stop",
+    ("buyer", "monitor"): "/autob monitor",
+    ("buyer", "buyer"):   "/autob buyer",
+    # monitor
+    ("monitor", "start"): "/autob monitor",
+    ("monitor", "stop"):  "/autob stop",
+}
+
+async def st_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
+    if not ctx.args or len(ctx.args) < 2:
+        await update.message.reply_text(
+            "Использование: `/st <цель> <команда> [аргументы]`\n"
+            "Пример: `/st sellers start`\n"
+            "Смотри /help для полного списка.",
+            parse_mode="Markdown"
+        )
+        return
+
+    target = ctx.args[0].lower()
+    sub = ctx.args[1].lower()
+    extra = ctx.args[2] if len(ctx.args) > 2 else None
+
+    # Определяем роль цели для маппинга команд
+    role_of_target = None
+    if target in ("seller", "sellers"):
+        role_of_target = "seller"
+    elif target == "buyer":
+        role_of_target = "buyer"
+    elif target == "monitor":
+        role_of_target = "monitor"
+
+    # Строим команду
+    if role_of_target and (role_of_target, sub) in ROLE_COMMAND_MAP:
+        command = ROLE_COMMAND_MAP[(role_of_target, sub)]
+    elif role_of_target == "seller" and sub == "rate" and extra:
+        command = f"/sell rate {extra}"
+    elif role_of_target == "buyer" and sub == "rate" and extra:
+        command = f"/autob rate {extra}"
+    elif target == "all" and sub == "stop":
+        # Стоп всем — отправим две команды
+        try:
+            api("/send_command", target="seller", command="/sell stop")
+            api("/send_command", target="buyer",  command="/autob stop")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {e}")
+            return
+        await update.message.reply_text("⏹ Команда *stop* отправлена всем аккаунтам.", parse_mode="Markdown")
+        return
+    else:
+        # Прямая передача команды как есть
+        command = "/" + " ".join(ctx.args[1:])
+
+    try:
+        r = api("/send_command", target=target, command=command)
+        result = r.json()
+        sent_to = result.get("sent_to", [])
+        if sent_to:
+            await update.message.reply_text(
+                f"✅ Команда `{command}` отправлена:\n" + "\n".join(f"  • {n}" for n in sent_to),
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("⚠️ Нет онлайн-аккаунтов с такой ролью/ником.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+# ── /sell — продать коины с байера ───────────────────────────────────────────
+
+async def sell_coins(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
+    if not ctx.args or len(ctx.args) < 2:
+        await update.message.reply_text(
+            "Использование: `/sell <количество> <курс>`\n"
+            "Пример: `/sell 500 55000` — продать 500 коинов по курсу 55 000",
+            parse_mode="Markdown"
+        )
+        return
+
+    try:
+        amount = int(ctx.args[0].replace(" ", ""))
+        rate   = int(ctx.args[1].replace(" ", ""))
+    except ValueError:
+        await update.message.reply_text("❌ Неверный формат. Пример: `/sell 500 55000`", parse_mode="Markdown")
+        return
+
+    if amount <= 0 or rate <= 0:
+        await update.message.reply_text("❌ Количество и курс должны быть больше 0.")
+        return
+
+    # Отправляем байеру команду на продажу через автопродажу коинов
+    command = f"/autob sellcoins {amount} {rate}"
+    try:
+        r = api("/send_command", target="buyer", command=command)
+        result = r.json()
+        sent_to = result.get("sent_to", [])
+        if sent_to:
+            total = amount * rate
+            await update.message.reply_text(
+                f"💸 *Продажа коинов запущена*\n\n"
+                f"Аккаунт: *{sent_to[0]}*\n"
+                f"Коинов: *{fmt(amount)}*\n"
+                f"Курс: *{fmt(rate)}* монет/коин\n"
+                f"Итого: *{fmt(total)}* монет",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("⚠️ Байер не в сети.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+# ── Ключи (без изменений) ─────────────────────────────────────────────────────
+
 async def add_key(update: Update, ctx: ContextTypes.DEFAULT_TYPE, days: int, note: str = ""):
     if not is_admin(update): return
-    r = requests.post(f"{SERVER}/admin/add", json={
-        "password": ADMIN_PASSWORD, "days": days, "note": note
-    })
+    r = api("/admin/add", days=days, note=note)
     data = r.json()
     key = data["key"]
     exp = data["expires"]
@@ -40,7 +277,7 @@ async def add_key(update: Update, ctx: ContextTypes.DEFAULT_TYPE, days: int, not
         f"`{key}`\n\n"
         f"📅 Истекает: *{exp}*\n"
         f"📝 Заметка: {note or '—'}\n\n"
-        f"Покупатель вводит в игре:\n`/key {key}`",
+        f"Вводить в игре:\n`/key {key}`",
         parse_mode="Markdown"
     )
 
@@ -67,7 +304,7 @@ async def add_custom(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def list_keys(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update): return
-    r = requests.post(f"{SERVER}/admin/list", json={"password": ADMIN_PASSWORD})
+    r = api("/admin/list")
     keys = r.json()
     if not keys:
         await update.message.reply_text("Ключей нет.")
@@ -79,7 +316,11 @@ async def list_keys(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         exp = v.get("expires_str", "?")
         hwid = "привязан" if v.get("hwid") else "свободен"
         note = v.get("note", "")
-        lines.append(f"{status} `{k}`\n  📅 {exp} (осталось {days_left}д) | HWID: {hwid}" + (f" | {note}" if note else ""))
+        lines.append(
+            f"{status} `{k}`\n"
+            f"  📅 {exp} (осталось {days_left}д) | HWID: {hwid}"
+            + (f" | {note}" if note else "")
+        )
     await update.message.reply_text("\n\n".join(lines), parse_mode="Markdown")
 
 async def disable(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -88,7 +329,7 @@ async def disable(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Использование: /disable <ключ>")
         return
     key = ctx.args[0].upper()
-    r = requests.post(f"{SERVER}/admin/disable", json={"password": ADMIN_PASSWORD, "key": key})
+    r = api("/admin/disable", key=key)
     if r.json().get("ok"):
         await update.message.reply_text(f"❌ Ключ `{key}` отключён.", parse_mode="Markdown")
     else:
@@ -100,21 +341,67 @@ async def reset_hwid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Использование: /reset <ключ>")
         return
     key = ctx.args[0].upper()
-    r = requests.post(f"{SERVER}/admin/reset_hwid", json={"password": ADMIN_PASSWORD, "key": key})
+    r = api("/admin/reset_hwid", key=key)
     if r.json().get("ok"):
         await update.message.reply_text(f"🔄 HWID сброшен для `{key}`.", parse_mode="Markdown")
     else:
         await update.message.reply_text("Ключ не найден.")
 
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("add1", add1))
-app.add_handler(CommandHandler("add7", add7))
-app.add_handler(CommandHandler("add30", add30))
-app.add_handler(CommandHandler("add", add_custom))
-app.add_handler(CommandHandler("list", list_keys))
-app.add_handler(CommandHandler("disable", disable))
-app.add_handler(CommandHandler("reset", reset_hwid))
+# ── Polling уведомлений о крупных покупках ────────────────────────────────────
+
+async def notify_loop(bot):
+    """Каждые 10 сек проверяем уведомления о крупных покупках."""
+    while True:
+        try:
+            r = requests.post(
+                f"{SERVER}/admin/notifications",
+                json={"password": ADMIN_PASSWORD},
+                timeout=10
+            )
+            notifications = r.json()
+            for n in notifications:
+                if n.get("type") == "big_buy":
+                    nick  = n.get("nick", "?")
+                    coins = n.get("coins", 0)
+                    rate  = n.get("rate", 0)
+                    money = n.get("money", 0)
+                    text = (
+                        f"🔔 *Крупная покупка!*\n\n"
+                        f"👤 Аккаунт: *{nick}*\n"
+                        f"🪙 Куплено: *{fmt(coins)} коинов*\n"
+                        f"📈 Курс: *{fmt(rate)}* монет/коин\n"
+                        f"💰 Потрачено: *{fmt(money)}* монет"
+                    )
+                    for admin_id in ADMIN_IDS:
+                        try:
+                            await bot.send_message(chat_id=int(admin_id), text=text, parse_mode="Markdown")
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        await asyncio.sleep(10)
+
+# ── Запуск ────────────────────────────────────────────────────────────────────
+
+application = ApplicationBuilder().token(TOKEN).build()
+
+application.add_handler(CommandHandler("start",   start))
+application.add_handler(CommandHandler("help",    help_cmd))
+application.add_handler(CommandHandler("stats",   stats))
+application.add_handler(CommandHandler("st",      st_cmd))
+application.add_handler(CommandHandler("sell",    sell_coins))
+application.add_handler(CommandHandler("add1",    add1))
+application.add_handler(CommandHandler("add7",    add7))
+application.add_handler(CommandHandler("add30",   add30))
+application.add_handler(CommandHandler("add",     add_custom))
+application.add_handler(CommandHandler("list",    list_keys))
+application.add_handler(CommandHandler("disable", disable))
+application.add_handler(CommandHandler("reset",   reset_hwid))
+
+async def post_init(app):
+    asyncio.create_task(notify_loop(app.bot))
+
+application.post_init = post_init
 
 print("Бот запущен!")
-app.run_polling()
+application.run_polling()

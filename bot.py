@@ -264,6 +264,53 @@ async def sell_coins(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
+# ── /zah — заход на анархию ──────────────────────────────────────────────────
+
+async def zah_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
+    try:
+        r = api("/send_command", target="all", command="/zah")
+        result = r.json()
+        sent_to = result.get("sent_to", [])
+        if sent_to:
+            await update.message.reply_text(
+                "🏰 Команда *зайти на анархию* отправлена:\n" + "\n".join(f"  • {n}" for n in sent_to),
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("⚠️ Нет онлайн-аккаунтов.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+# ── /fpay — перевод монет (только buyer) ─────────────────────────────────────
+
+async def fpay_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update): return
+    if not ctx.args or len(ctx.args) < 2:
+        await update.message.reply_text(
+            "Использование: `/fpay <ник> <сумма>`\nПример: `/fpay Player123 50000`",
+            parse_mode="Markdown"
+        )
+        return
+
+    nick_target = ctx.args[0]
+    amount      = ctx.args[1]
+
+    command = f"/fpay {nick_target} {amount}"
+    try:
+        r = api("/send_command", target="buyer", command=command)
+        result = r.json()
+        sent_to = result.get("sent_to", [])
+        if sent_to:
+            await update.message.reply_text(
+                f"💸 Перевод *{amount}* монет → *{nick_target}*\nОтправлено байеру: *{sent_to[0]}*",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("⚠️ Байер не в сети.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
 # ── Ключи (без изменений) ─────────────────────────────────────────────────────
 
 async def add_key(update: Update, ctx: ContextTypes.DEFAULT_TYPE, days: int, note: str = ""):
@@ -397,6 +444,8 @@ application.add_handler(CommandHandler("add",     add_custom))
 application.add_handler(CommandHandler("list",    list_keys))
 application.add_handler(CommandHandler("disable", disable))
 application.add_handler(CommandHandler("reset",   reset_hwid))
+application.add_handler(CommandHandler("zah",     zah_cmd))
+application.add_handler(CommandHandler("fpay",    fpay_cmd))
 
 async def post_init(app):
     asyncio.create_task(notify_loop(app.bot))

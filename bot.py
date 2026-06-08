@@ -430,27 +430,31 @@ async def notify_loop(bot):
 
 # ── Запуск ────────────────────────────────────────────────────────────────────
 
-application = ApplicationBuilder().token(TOKEN).build()
+async def main():
+    application = ApplicationBuilder().token(TOKEN).build()
 
-application.add_handler(CommandHandler("start",   start))
-application.add_handler(CommandHandler("help",    help_cmd))
-application.add_handler(CommandHandler("stats",   stats))
-application.add_handler(CommandHandler("st",      st_cmd))
-application.add_handler(CommandHandler("sell",    sell_coins))
-application.add_handler(CommandHandler("add1",    add1))
-application.add_handler(CommandHandler("add7",    add7))
-application.add_handler(CommandHandler("add30",   add30))
-application.add_handler(CommandHandler("add",     add_custom))
-application.add_handler(CommandHandler("list",    list_keys))
-application.add_handler(CommandHandler("disable", disable))
-application.add_handler(CommandHandler("reset",   reset_hwid))
-application.add_handler(CommandHandler("zah",     zah_cmd))
-application.add_handler(CommandHandler("fpay",    fpay_cmd))
+    application.add_handler(CommandHandler("start",   start))
+    application.add_handler(CommandHandler("help",    help_cmd))
+    application.add_handler(CommandHandler("stats",   stats))
+    application.add_handler(CommandHandler("st",      st_cmd))
+    application.add_handler(CommandHandler("sell",    sell_coins))
+    application.add_handler(CommandHandler("add1",    add1))
+    application.add_handler(CommandHandler("add7",    add7))
+    application.add_handler(CommandHandler("add30",   add30))
+    application.add_handler(CommandHandler("add",     add_custom))
+    application.add_handler(CommandHandler("list",    list_keys))
+    application.add_handler(CommandHandler("disable", disable))
+    application.add_handler(CommandHandler("reset",   reset_hwid))
+    application.add_handler(CommandHandler("zah",     zah_cmd))
+    application.add_handler(CommandHandler("fpay",    fpay_cmd))
 
-async def post_init(app):
-    asyncio.create_task(notify_loop(app.bot))
+    print("Бот запущен!")
+    async with application:
+        await application.initialize()
+        asyncio.create_task(notify_loop(application.bot))
+        await application.start()
+        await application.updater.start_polling()
+        await asyncio.Event().wait()
 
-application.post_init = post_init
-
-print("Бот запущен!")
-application.run_polling()
+if __name__ == "__main__":
+    asyncio.run(main())
